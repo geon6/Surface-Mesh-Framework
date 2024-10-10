@@ -1,0 +1,43 @@
+{
+    "version": 3,
+    "configurePresets": [
+        {
+            "name": "windows-base",
+            "hidden": true,
+            "generator": "Visual Studio 17 2022",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "installDir": "${sourceDir}/install/${presetName}",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "cl.exe",
+                "CMAKE_CXX_COMPILER": "cl.exe",
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_CXX_STANDARD": "17",
+                "CMAKE_CXX_STANDARD_REQUIRED": true,
+                "VCPKG_TARGET_TRIPLET": "x64-windows",
+                "Qt6_DIR": "$env{QT_ROOT}/lib/cmake/Qt6",
+                "Qt6Core_DIR": "$env{QT_ROOT}/lib/cmake/Qt6Core",
+                "Qt6CoreTools_DIR": "$env{QT_ROOT}/lib/cmake/Qt6CoreTools",
+                "Qt6EntryPointPrivate_DIR": "$env{QT_ROOT}/lib/cmake/Qt6EntryPointPrivate",
+                "Qt6GuiTools_DIR": "$env{QT_ROOT}/lib/cmake/Qt6GuiTools",
+                "Qt6Gui_DIR": "$env{QT_ROOT}/lib/cmake/Qt6Gui",
+                "Qt6WidgetsTools_DIR": "$env{QT_ROOT}/lib/cmake/Qt6WidgetsTools",
+                "Qt6Widgets_DIR": "$env{QT_ROOT}/lib/cmake/Qt6Widgets",
+                "Qt6OpenGL_DIR": "$env{QT_ROOT}/lib/cmake/Qt6OpenGL",
+                "Qt6OpenGLWidgets_DIR": "$env{QT_ROOT}/lib/cmake/Qt6OpenGLWidgets"
+            },
+            "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+        },
+        {
+            "name": "x64-debug",
+            "displayName": "x64 Debug",
+            "inherits": "windows-base",
+            "architecture": {
+                "value": "x64",
+                "strategy": "external"
+            },
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        }
+    ]
+}

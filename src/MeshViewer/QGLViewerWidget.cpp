@@ -1,473 +1,500 @@
-#include <iomanip>
+#include <iostream>
 #include <sstream>
-#include <algorithm>
 
 #include <QApplication>
 #include <QMouseEvent>
-#include <QDesktopWidget>
+#include <QOpenGLTexture>
+#include <MeshViewer/QGLViewerWidget.h>
 
-#include "QGLViewerWidget.h"
-
-//#include <GL/glut.h>
-
-#if !defined(M_PI)
-#  define M_PI 3.1415926535897932
-#endif
-
-const double TRACKBALL_RADIUS = 0.6;
-
-//using namespace Qt;
+const double QGLViewerWidget::trackballradius = 0.6;
 
 QGLViewerWidget::QGLViewerWidget(QWidget* _parent)
-	: QGLWidget(_parent)
+    : QOpenGLWidget(_parent),
+    drawmode(FLATLINES),
+    projectionmode(PERSPECTIVE),
+    windowleft(-1),
+    windowright(1),
+    windowtop(1),
+    windowbottom(-1),
+    mousemode(Qt::NoButton),
+    center(0),
+    radius(0),
+    projectionmatrix(16, 0.0),
+    modelviewmatrix(16, 0.0),
+    copymodelviewmatrix(16, 0.0),
+    lastpoint2(0, 0),
+    lastpoint3(0),
+    lastpointok(false)
 {
-	init();
+    Init();
 }
 
-QGLViewerWidget::
-QGLViewerWidget(QGLFormat& _fmt, QWidget* _parent)
-	: QGLWidget(_fmt, _parent)
+QGLViewerWidget::~QGLViewerWidget(void)
 {
-	init();
 }
 
-void QGLViewerWidget::init(void)
+void QGLViewerWidget::Init(void)
 {
-	// qt stuff
-	setAttribute(Qt::WA_NoSystemBackground, true);
-	setFocusPolicy(Qt::StrongFocus);
-	//setAcceptDrops( true );  
-	//setCursor(PointingHandCursor);
+    // qt stuff
+    setAttribute(Qt::WA_NoSystemBackground, true);
+    setFocusPolicy(Qt::StrongFocus);
+    //setAcceptDrops( true );  
+    //setCursor(PointingHandCursor);
 
-	// draw mode
-	//draw_mode_ = SOLID_SMOOTH;
-	mouse_mode_ = Qt::NoButton;
-
-	//initialize
-	ModelViewMatrix.resize(16, 0.0);
-	ProjectionMatrix.resize(16, 0.0);
-	
-	Center = OpenMesh::Vec3d(0,0,0);
-	Radius = 0.0;
-
-	//SetGlWindoPosFunc();
-	//BuildFont(NULL);
-	pro_mode_ = PERSPECTIVE;
-	set_pro_mode(PERSPECTIVE);
+    SetProjectionMode(projectionmode);
 }
 
-QGLViewerWidget::~QGLViewerWidget()
+QSize QGLViewerWidget::minimumSizeHint(void) const
 {
-	//KillFont();
+    return QSize(10, 10);
 }
 
-QSize QGLViewerWidget::minimumSizeHint() const
+QSize QGLViewerWidget::sizeHint(void) const
 {
-	return QSize(10, 10);
+    QRect rect = QApplication::primaryScreen()->availableGeometry();
+    return QSize(int(rect.width()*0.8), int(rect.height()*1.0));
 }
 
-QSize QGLViewerWidget::sizeHint() const
+const double& QGLViewerWidget::Radius(void) const
 {
-	QRect rect = QApplication::desktop()->screenGeometry();
-	return QSize(int(rect.width()*0.8),int(rect.height()*1.0));
+    return radius;
 }
 
-void QGLViewerWidget::setDefaultMaterial(void)
+const OpenMesh::Vec3d& QGLViewerWidget::Center(void) const
 {
-	// material
-#if 1
-	GLfloat mat_a[] = { 0.7f, 0.7f, 0.7f, 1.0f };
-	GLfloat mat_d[] = { 0.88f, 0.84f, 0.76f, 1.0f };
-	GLfloat mat_s[] = { 0.4f, 0.4f, 0.4f, 1.0f };
-	GLfloat shine[] = { 120.0f };
-
-	/*GLfloat mat_a[] = { 0.19225f, 0.19225f, 0.19225f, 1.0f };
-	GLfloat mat_d[] = { 0.50754f, 0.50754f, 0.50754f, 1.0f };
-	GLfloat mat_s[] = { 0.508273f, 0.508273f, 0.508273f, 1.0f };
-	GLfloat shine[] = { 51.2f };*/
-#else
-	GLfloat mat_a[] = { 0.0, 0.5, 0.75, 1.0 };
-	GLfloat mat_d[] = { 0.0, 0.5, 1.0, 1.0 };
-	GLfloat mat_s[] = { 0.75, 0.75, 0.75, 1.0 };
-	GLfloat emission[] = { 0.3f, 0.3f, 0.3f, 1.0f };
-	GLfloat shine[] = { 120.0 };
-#endif
-
-	glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT,   mat_a);
-	glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE,   mat_d);
-	glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR,  mat_s);
-	glMaterialfv(GL_FRONT_AND_BACK, GL_SHININESS, shine);
-	//glMaterialfv(GL_FRONT_AND_BACK, GL_EMISSION, emission);
+    return center;
 }
 
-void QGLViewerWidget::setDefaultLight(void)
+const double* QGLViewerWidget::GetModelviewMatrix(void) const
 {
-#if 1
-	// lighting
-	GLfloat pos1[] = { 10.0f, 10.0f, -10.0f, 0.0f };
-	GLfloat pos2[] = { -10.0f, 10.0f, -10.0f, 0.0f };
-	GLfloat pos3[] = { 0.0f, 0.0f, 10.0f, 0.0f };
-	/*GLfloat col1[] = { 0.5f, 0.5f, 0.5f, 1.0f };
-	GLfloat col2[] = { 0.5f, 0.5f, 0.5f, 1.0f };
-	GLfloat col3[] = { 0.8f, 0.8f, 0.8f, 1.0f };*/
-	GLfloat col1[] = { 0.8f, 0.8f, 0.8f, 1.0f };
-	GLfloat col2[] = { 0.8f, 0.8f, 0.8f, 1.0f };
-	GLfloat col3[] = { 0.8f, 0.8f, 0.8f, 1.0f };
-
-	glEnable(GL_LIGHT0);
-	glLightfv(GL_LIGHT0, GL_POSITION, pos1);
-	glLightfv(GL_LIGHT0, GL_DIFFUSE, col1);
-	glLightfv(GL_LIGHT0, GL_SPECULAR, col1);
-
-	glEnable(GL_LIGHT1);
-	glLightfv(GL_LIGHT1, GL_POSITION, pos2);
-	glLightfv(GL_LIGHT1, GL_DIFFUSE, col2);
-	glLightfv(GL_LIGHT1, GL_SPECULAR, col2);
-
-	glEnable(GL_LIGHT2);
-	glLightfv(GL_LIGHT2, GL_POSITION, pos3);
-	glLightfv(GL_LIGHT2, GL_DIFFUSE, col3);
-	glLightfv(GL_LIGHT2, GL_SPECULAR, col3);
-#else
-	// lighting
-	GLfloat pos3[] = { 0.0f, 0.0f, 10.0f, 0.0f };
-	GLfloat col3[] = { 0.8f, 0.8f, 0.8f, 1.0f };
-	glEnable(GL_LIGHT0);
-	glLightfv(GL_LIGHT2, GL_POSITION, pos3);
-	glLightfv(GL_LIGHT2, GL_DIFFUSE, col3);
-	glLightfv(GL_LIGHT2, GL_SPECULAR, col3);
-#endif
-	
+    return &modelviewmatrix[0];
 }
 
-void QGLViewerWidget::initializeGL()
-{  
-	// OpenGL state
-	//glClearColor(0.0, 0.0, 0.0, 0.0);
-	glClearColor(1.0, 1.0, 1.0, 1.0);
-	//glClearColor(0.196, 0.196, 0.196, 1.0);
-	glDisable( GL_DITHER );
-	glEnable( GL_DEPTH_TEST );
-	glEnable(GL_MULTISAMPLE);
-	glEnable(GL_LINE_SMOOTH);
-	glEnable(GL_BLEND);
-	glBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-	glHint(GL_LINE_SMOOTH_HINT, GL_NICEST);
-	glEnable(GL_POINT_SMOOTH); 
-	glHint(GL_POINT_SMOOTH_HINT, GL_NICEST); 
-
-	// Material
-	setDefaultMaterial();
-	// Lighting
-	glLoadIdentity();
-	setDefaultLight();  
-	
-	// scene pos and size
-	glMatrixMode(GL_MODELVIEW);
-	glLoadIdentity();
-	//glGetDoublev(GL_MODELVIEW_MATRIX, modelview_matrix_);
-
-	//for initialize all the viewports
-	glGetDoublev( GL_MODELVIEW_MATRIX, &ModelViewMatrix[0] );
-	
-	set_scene_pos(OpenMesh::Vec3d(0.0, 0.0, 0.0), 1.0);
+void QGLViewerWidget::ResetModelviewMatrix(void)
+{
+    makeCurrent();
+    glLoadIdentity();
+    glGetDoublev(GL_MODELVIEW_MATRIX, &modelviewmatrix[0]);
 }
 
-void QGLViewerWidget::resizeGL( int _w, int _h )
+void QGLViewerWidget::CopyModelViewMatrix(void)
 {
-	glViewport(0, 0, _w, _h);
-	update_projection_matrix();
-	updateGL();
+    copymodelviewmatrix = modelviewmatrix;
 }
 
-void QGLViewerWidget::paintGL()
+void QGLViewerWidget::LoadCopyModelViewMatrix(void)
 {
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-	
-	draw_scene(draw_mode_);
-
-	//renderText(1,1,"");
+    modelviewmatrix = copymodelviewmatrix;
 }
 
-void QGLViewerWidget::draw_scene(int drawmode)
+const double* QGLViewerWidget::GetProjectionMatrix(void) const
 {
-	glMatrixMode( GL_PROJECTION );
-	glLoadMatrixd( &ProjectionMatrix[0] );
-	glMatrixMode( GL_MODELVIEW );
-	glLoadMatrixd( &ModelViewMatrix[0] );
-	assert(drawmode < N_DRAW_MODES);
-	switch (drawmode)
-	{
-	case WIRE_FRAME:
-		glDisable(GL_LIGHTING);
-		//glutWireTeapot(0.5);
-		break;
-	case SOLID_FLAT:
-		glEnable(GL_LIGHTING);
-		glShadeModel(GL_FLAT);
-		//glutSolidTeapot(0.5);
-		break;
-	case FLAT_POINTS:
-		glEnable(GL_LIGHTING);
-		glShadeModel(GL_FLAT);
-		//glutSolidTeapot(0.5);
-		break;
-	case HIDDEN_LINES:
-		glDisable(GL_LIGHTING);
-		break;
-	case SOLID_SMOOTH:
-		glEnable(GL_LIGHTING);
-		glShadeModel(GL_SMOOTH);
-		//glutSolidTeapot(0.5);
-		break;
-	default:
-		break;
-	}
+    return &projectionmatrix[0];
+}
+
+void QGLViewerWidget::SetDrawMode(const DrawMode &dm)
+{
+    drawmode = dm;
+    update();
+}
+
+const QGLViewerWidget::DrawMode& QGLViewerWidget::GetDrawMode(void) const
+{
+    return drawmode;
+}
+
+void QGLViewerWidget::SetProjectionMode(const ProjectionMode &pm)
+{
+    projectionmode = pm;
+    UpdateProjectionMatrix();
+    ViewAll();
+}
+
+const QGLViewerWidget::ProjectionMode& QGLViewerWidget::GetProjectionMode(void) const
+{
+    return projectionmode;
+}
+
+void QGLViewerWidget::SetMaterial(const MaterialType & mattype) const
+{
+    std::vector<GLfloat> matAmbient, matDiffuse, matSpecular;
+    GLfloat matShininess;
+    switch (mattype)
+    {
+    default:
+    case MaterialDefault:
+        matAmbient = { 1.0f, 1.0f, 1.0f, 1.0f };
+        matDiffuse = { 1.0f, 1.0f, 1.0f, 1.0f };
+        matSpecular = { 1.0f, 1.0f, 1.0f, 1.0f };
+        matShininess = 120.0f;
+        break;
+    case MaterialGold:
+        matAmbient = { 0.9f, 0.667f, 0.0f, 1.0f };
+        matDiffuse = { 0.9f, 0.749f, 0.251f, 1.0f };
+        matSpecular = { 0.9f, 0.816f, 0.451f, 1.0f };
+        matShininess = 50.0f;
+        break;
+    case MaterialSilver:
+        matAmbient = { 0.3f, 0.3f, 0.3f, 1.0f };
+        matDiffuse = { 0.7f, 0.7f, 0.7f, 1.0f };
+        matSpecular = { 0.7f, 0.7f, 0.7f, 1.0f };
+        matShininess = 51.2f;
+        break;
+    case MaterialEmerald:
+        matAmbient = { 0.143f, 0.549f, 0.143f, 1.0f };
+        matDiffuse = { 0.143f, 0.549f, 0.143f, 1.0f };
+        matSpecular = { 0.733f, 0.927811f, 0.733f, 1.0f };
+        matShininess = 76.8f;
+        break;
+    case MaterialTin:
+        matAmbient = { 0.405882f, 0.358824f, 0.413725f, 1.0f };
+        matDiffuse = { 0.727451f, 0.770588f, 0.841176f, 1.0f };
+        matSpecular = { 0.633333f, 0.633333f, 0.821569f, 1.0f };
+        matShininess = 59.84615f;
+        break;
+    }
+    glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, matAmbient.data());
+    glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, matDiffuse.data());
+    glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, matSpecular.data());
+    glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, matShininess);
+}
+
+void QGLViewerWidget::SetDefaultLight(void) const
+{
+    // lighting
+    GLfloat pos1[] = { 10.0f, 10.0f, -10.0f, 0.0f };
+    GLfloat pos2[] = { -10.0f, 10.0f, -10.0f, 0.0f };
+    GLfloat pos3[] = { 0.0f, 0.0f, 10.0f, 0.0f };
+    GLfloat col1[] = { 0.8f, 0.8f, 0.8f, 1.0f };
+    GLfloat col2[] = { 0.8f, 0.8f, 0.8f, 1.0f };
+    GLfloat col3[] = { 0.8f, 0.8f, 0.8f, 1.0f };
+
+    glEnable(GL_LIGHT0);
+    glLightfv(GL_LIGHT0, GL_POSITION, pos1);
+    glLightfv(GL_LIGHT0, GL_DIFFUSE, col1);
+    glLightfv(GL_LIGHT0, GL_SPECULAR, col1);
+
+    glEnable(GL_LIGHT1);
+    glLightfv(GL_LIGHT1, GL_POSITION, pos2);
+    glLightfv(GL_LIGHT1, GL_DIFFUSE, col2);
+    glLightfv(GL_LIGHT1, GL_SPECULAR, col2);
+
+    glEnable(GL_LIGHT2);
+    glLightfv(GL_LIGHT2, GL_POSITION, pos3);
+    glLightfv(GL_LIGHT2, GL_DIFFUSE, col3);
+    glLightfv(GL_LIGHT2, GL_SPECULAR, col3);
+}
+
+void QGLViewerWidget::initializeGL(void)
+{
+    // OpenGL state
+    glClearColor(1.0, 1.0, 1.0, 0.0);
+    glClearDepth(1.0);
+    //glDisable(GL_DITHER);
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_MULTISAMPLE);
+    glEnable(GL_LINE_SMOOTH);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glHint(GL_LINE_SMOOTH_HINT, GL_NICEST);
+    glEnable(GL_POINT_SMOOTH);
+    glHint(GL_POINT_SMOOTH_HINT, GL_NICEST);
+
+    // Material
+    SetMaterial();
+    // Lighting
+    glLoadIdentity();
+    SetDefaultLight();
+
+    // scene pos and size
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+    //glGetDoublev(GL_MODELVIEW_MATRIX, modelview_matrix_);
+
+    //for initialize all the viewports
+    glGetDoublev(GL_MODELVIEW_MATRIX, &modelviewmatrix[0]);
+    CopyModelViewMatrix();
+
+    SetScenePosition(OpenMesh::Vec3d(0.0, 0.0, 0.0), 1.0);
+    //LoadTexture();
+}
+
+void QGLViewerWidget::resizeGL(int _w, int _h)
+{
+    glViewport(0, 0, _w, _h);
+    UpdateProjectionMatrix();
+    update();
+}
+
+void QGLViewerWidget::paintGL(void)
+{
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    DrawScene();
+}
+
+void QGLViewerWidget::DrawScene(void)
+{
+    glMatrixMode(GL_PROJECTION);
+    glLoadMatrixd(&projectionmatrix[0]);
+    glMatrixMode(GL_MODELVIEW);
+    glLoadMatrixd(&modelviewmatrix[0]);
+    switch (drawmode)
+    {
+    case WIREFRAME:
+        glDisable(GL_LIGHTING);
+        //glutWireTeapot(0.5);
+        break;
+    case FLAT:
+        glEnable(GL_LIGHTING);
+        glShadeModel(GL_FLAT);
+        //glutSolidTeapot(0.5);
+        break;
+    case FLATLINES:
+        glEnable(GL_LIGHTING);
+        glShadeModel(GL_FLAT);
+        //glutSolidTeapot(0.5);
+        break;
+    case HIDDENLINES:
+        glDisable(GL_LIGHTING);
+        break;
+    case SMOOTH:
+        glEnable(GL_LIGHTING);
+        glShadeModel(GL_SMOOTH);
+        //glutSolidTeapot(0.5);
+        break;
+    default:
+        break;
+    }
 }
 
 void QGLViewerWidget::mousePressEvent(QMouseEvent* _event)
 {
-	//assert(mouse_mode_ < N_MOUSE_MODES);
-	last_point_2D_ = _event->pos();
-	last_point_ok_ = map_to_sphere( last_point_2D_, last_point_3D_ );
-	mouse_mode_ = _event->button();
+    //assert(mousemode < N_MOUSE_MODES);
+    lastpoint2 = _event->pos();
+    lastpointok = MapToSphere(lastpoint2, lastpoint3);
+    mousemode = _event->button();
 }
 
 void QGLViewerWidget::mouseMoveEvent(QMouseEvent* _event)
-{  
-	//assert(mouse_mode_ < N_MOUSE_MODES);
+{
+    QPoint newPoint2D = _event->pos();
+    if (lastpointok)
+    {
+        switch (mousemode)
+        {
+        case Qt::LeftButton:
+            Rotation(newPoint2D);
+            break;
+        case Qt::RightButton:
+            Translation(newPoint2D);
+            break;
+        default:
+            break;
+        }
+    } // end of if
 
-	QPoint newPoint2D = _event->pos(); 
-
-	// enable GL context
-	makeCurrent();
-
-	if ( last_point_ok_ ) 
-	{
-		switch ( mouse_mode_ )
-		{
-		case Qt::LeftButton:
-			rotation(newPoint2D);
-			break;
-		case Qt::RightButton:
-			translation(newPoint2D);
-			break;
-		default:
-			break;
-		}
-	} // end of if
-
-	// remember this point
-	last_point_2D_ = newPoint2D;
-	last_point_ok_ = map_to_sphere(last_point_2D_,last_point_3D_);
-	
-	// trigger redraw
-	updateGL();
+    // remember this point
+    lastpoint2 = newPoint2D;
+    lastpointok = MapToSphere(lastpoint2, lastpoint3);
+    // trigger redraw
+    update();
 }
 
-void QGLViewerWidget::mouseReleaseEvent(QMouseEvent* /* _event */ )
-{  
-	//assert(mouse_mode_ < N_MOUSE_MODES);
-	mouse_mode_ = Qt::NoButton;
-	last_point_ok_ = false;
+void QGLViewerWidget::mouseReleaseEvent(QMouseEvent*  _event)
+{
+    //assert(mousemode < N_MOUSE_MODES);
+    mousemode = Qt::NoButton;
+    lastpointok = false;
 }
 
 void QGLViewerWidget::wheelEvent(QWheelEvent* _event)
 {
-	// Use the mouse wheel to zoom in/out
-	float d = -(float)_event->delta() / 120.0 * 0.05 * Radius;
-	translate(OpenMesh::Vec3d(0.0, 0.0, d));
-	updateGL();
-	_event->accept();
+    // Use the mouse wheel to zoom in/out
+    double d = -_event->angleDelta().y() / 120.0 * 0.05 * radius;
+    Translate(OpenMesh::Vec3d(0.0, 0.0, d));
+    update();
 }
 
-void QGLViewerWidget::keyPressEvent( QKeyEvent* _event)
+void QGLViewerWidget::keyPressEvent(QKeyEvent* _event)
 {
-	switch(_event->key())
-	{
-	case Qt::Key_Q:
-	case Qt::Key_Escape:
-		qApp->quit();
-		break;
-	}
-	_event->ignore();
+    switch (_event->key())
+    {
+    case Qt::Key_Escape:
+        qApp->quit();
+        break;
+    }
+    _event->ignore();
 }
 
-void QGLViewerWidget::translation(QPoint p)
+void QGLViewerWidget::keyReleaseEvent(QKeyEvent* _event)
 {
-	double z = - (ModelViewMatrix[ 2]*Center[0] + 
-		ModelViewMatrix[6]*Center[1] + 
-		ModelViewMatrix[10]*Center[2] + 
-		ModelViewMatrix[14]) /
-		(ModelViewMatrix[3]*Center[0] + 
-		ModelViewMatrix[7]*Center[1] + 
-		ModelViewMatrix[11]*Center[2] + 
-		ModelViewMatrix[15]);
-
-	double w = width(); double h = height();
-	double aspect     =  w/h;
-	double near_plane = 0.01 * Radius;
-	double top        = tan(fovy()/2.0f*M_PI/180.0f) * near_plane;
-	double right      = aspect*top;
-
-	double dx = p.x() - last_point_2D_.x();
-	double dy = p.y() - last_point_2D_.y();
-
-	translate(OpenMesh::Vec3d( 2.0*dx/w*right/near_plane*z, 
-								-2.0*dy/h*top/near_plane*z, 
-								0.0f));
+    _event->ignore();
 }
 
-void QGLViewerWidget::translate(const OpenMesh::Vec3d& _trans)
+void QGLViewerWidget::Translation(const QPoint & p)
 {
-	// Translate the object by _trans
-	// Update modelview_matrix_
-	makeCurrent();
-	glLoadIdentity();
-	glTranslated( _trans[0], _trans[1], _trans[2] );
-	glMultMatrixd(&ModelViewMatrix[0]);
-	glGetDoublev(GL_MODELVIEW_MATRIX, &ModelViewMatrix[0]);
+    double z = -(modelviewmatrix[2] * center[0] +
+        modelviewmatrix[6] * center[1] +
+        modelviewmatrix[10] * center[2] +
+        modelviewmatrix[14]) /
+        (modelviewmatrix[3] * center[0] +
+            modelviewmatrix[7] * center[1] +
+            modelviewmatrix[11] * center[2] +
+            modelviewmatrix[15]);
+
+    double w = width(); double h = height();
+    double aspect = w / h;
+    double near_plane = 0.01 * radius;
+    double top = tan(45.0 / 2.0f*M_PI / 180.0f) * near_plane;
+    double right = aspect*top;
+
+    double dx = p.x() - lastpoint2.x();
+    double dy = p.y() - lastpoint2.y();
+
+    Translate(OpenMesh::Vec3d(2.0*dx / w*right / near_plane*z,
+        -2.0*dy / h*top / near_plane*z,
+        0.0f));
 }
 
-void QGLViewerWidget::rotation(QPoint p)
+void QGLViewerWidget::Translate(const OpenMesh::Vec3d & _trans)
 {
-	OpenMesh::Vec3d  newPoint3D;
-	bool newPoint_hitSphere = map_to_sphere(p, newPoint3D);
-	if (newPoint_hitSphere)
-	{
-		OpenMesh::Vec3d axis = last_point_3D_ % newPoint3D;
-		if (axis.sqrnorm() < 1e-7)
-		{
-			axis = OpenMesh::Vec3d(1,0,0);
-		} 
-		else 
-		{
-			axis.normalize();
-		}
-		// find the amount of rotation
-		OpenMesh::Vec3d d = last_point_3D_ - newPoint3D;
-		double t = 0.5*d.norm()/TRACKBALL_RADIUS;
-		if (t<-1.0) t=-1.0;
-		else if (t>1.0) t=1.0;
-		double phi = 2.0 * asin(t);
-		double  angle =  phi * 180.0 / M_PI;
-		rotate( axis, angle );
-	}
-}
-void QGLViewerWidget::rotate(const OpenMesh::Vec3d& _axis, double _angle)
-{
-	// Rotate around center center_, axis _axis, by angle _angle
-	// Update modelview_matrix_
-
-	OpenMesh::Vec3d t( ModelViewMatrix[0]*Center[0] + 
-		ModelViewMatrix[4]*Center[1] +
-		ModelViewMatrix[8]*Center[2] + 
-		ModelViewMatrix[12],
-		ModelViewMatrix[1]*Center[0] + 
-		ModelViewMatrix[5]*Center[1] +
-		ModelViewMatrix[9]*Center[2] + 
-		ModelViewMatrix[13],
-		ModelViewMatrix[2]*Center[0] + 
-		ModelViewMatrix[6]*Center[1] +
-		ModelViewMatrix[10]*Center[2] + 
-		ModelViewMatrix[14] );
-	
-	makeCurrent();
-	glLoadIdentity();
-	glTranslatef(t[0], t[1], t[2]);
-	glRotated( _angle, _axis[0], _axis[1], _axis[2]);
-	glTranslatef(-t[0], -t[1], -t[2]); 
-	glMultMatrixd(&ModelViewMatrix[0]);
-	glGetDoublev(GL_MODELVIEW_MATRIX, &ModelViewMatrix[0]);
+    // Translate the object by _trans
+    // Update modelview_matrix_
+    makeCurrent();
+    glLoadIdentity();
+    glTranslated(_trans[0], _trans[1], _trans[2]);
+    glMultMatrixd(&modelviewmatrix[0]);
+    glGetDoublev(GL_MODELVIEW_MATRIX, &modelviewmatrix[0]);
 }
 
-bool QGLViewerWidget::map_to_sphere(const QPoint& _v2D, OpenMesh::Vec3d& _v3D)
+void QGLViewerWidget::Rotation(const QPoint & p)
 {
-	// This is actually doing the Sphere/Hyperbolic sheet hybrid thing,
+    OpenMesh::Vec3d  newPoint3D;
+    bool newPoint_hitSphere = MapToSphere(p, newPoint3D);
+    if (newPoint_hitSphere)
+    {
+        OpenMesh::Vec3d axis = lastpoint3 % newPoint3D;
+        if (axis.sqrnorm() < 1e-7)
+        {
+            axis = OpenMesh::Vec3d(1, 0, 0);
+        }
+        else
+        {
+            axis.normalize();
+        }
+        // find the amount of rotation
+        OpenMesh::Vec3d d = lastpoint3 - newPoint3D;
+        double t = 0.5*d.norm() / trackballradius;
+        if (t < -1.0) t = -1.0;
+        else if (t > 1.0) t = 1.0;
+        double phi = 2.0 * asin(t);
+        double  angle = phi * 180.0 / M_PI;
+        Rotate(axis, angle);
+    }
+}
+
+void QGLViewerWidget::Rotate(const OpenMesh::Vec3d& _axis, const double & _angle)
+{
+    // Rotate around center center_, axis _axis, by angle _angle
+    // Update modelview_matrix_
+
+    OpenMesh::Vec3d t(modelviewmatrix[0] * center[0] +
+        modelviewmatrix[4] * center[1] +
+        modelviewmatrix[8] * center[2] +
+        modelviewmatrix[12],
+        modelviewmatrix[1] * center[0] +
+        modelviewmatrix[5] * center[1] +
+        modelviewmatrix[9] * center[2] +
+        modelviewmatrix[13],
+        modelviewmatrix[2] * center[0] +
+        modelviewmatrix[6] * center[1] +
+        modelviewmatrix[10] * center[2] +
+        modelviewmatrix[14]);
+
+    makeCurrent();
+    glLoadIdentity();
+    glTranslatef(t[0], t[1], t[2]);
+    glRotated(_angle, _axis[0], _axis[1], _axis[2]);
+    glTranslatef(-t[0], -t[1], -t[2]);
+    glMultMatrixd(&modelviewmatrix[0]);
+    glGetDoublev(GL_MODELVIEW_MATRIX, &modelviewmatrix[0]);
+}
+
+bool QGLViewerWidget::MapToSphere(const QPoint& _v2D, OpenMesh::Vec3d& _v3D)
+{
+    // This is actually doing the Sphere/Hyperbolic sheet hybrid thing,
     // based on Ken Shoemake's ArcBall in Graphics Gems IV, 1993.
-    double x =  (2.0*_v2D.x() - width())/width();
-    double y = -(2.0*_v2D.y() - height())/height();
+    double x = (2.0*_v2D.x() - width()) / width();
+    double y = -(2.0*_v2D.y() - height()) / height();
     double xval = x;
     double yval = y;
     double x2y2 = xval*xval + yval*yval;
 
-    const double rsqr = TRACKBALL_RADIUS*TRACKBALL_RADIUS;
+    const double rsqr = trackballradius * trackballradius;
     _v3D[0] = xval;
     _v3D[1] = yval;
     if (x2y2 < 0.5*rsqr)
-	{
+    {
         _v3D[2] = sqrt(rsqr - x2y2);
-    } 
-	else 
-	{
-        _v3D[2] = 0.5*rsqr/sqrt(x2y2);
     }
-    
+    else
+    {
+        _v3D[2] = 0.5*rsqr / sqrt(x2y2);
+    }
+
     return true;
 }
 
-void QGLViewerWidget::update_projection_matrix()
+void QGLViewerWidget::UpdateProjectionMatrix(void)
 {
-	makeCurrent();
-	glMatrixMode(GL_PROJECTION);
-	glLoadIdentity();
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
 
-	if(PERSPECTIVE == pro_mode_)
-	{
-		gluPerspective(45.0, (GLfloat) width() / (GLfloat) height(), 0.01*Radius, 100.0*Radius);
-	}
-	else if(ORTHOTROPIC2D == pro_mode_) //not work for 
-	{
-		gluOrtho2D(w_left, w_right, w_bottom, w_top);
-	}
-	else
-	{
-	}
-	
-	glGetDoublev(GL_PROJECTION_MATRIX, &ProjectionMatrix[0]);
-
-	//glGetDoublev(GL_PROJECTION_MATRIX, projection_matrix_);
-	glMatrixMode(GL_MODELVIEW);
+    if (PERSPECTIVE == projectionmode)
+    {
+        glFrustum(-0.01 * radius * (sqrt(2.0) - 1) * width() / height(),
+            0.01 * radius * (sqrt(2.0) - 1) * width() / height(),
+            -0.01 * radius * (sqrt(2.0) - 1),
+            0.01 * radius * (sqrt(2.0) - 1),
+            0.01 * radius,
+            100.0 * radius);
+    }
+    else if (ORTHOGRAPHIC == projectionmode) //not work for 
+    {
+        glOrtho(windowleft, windowright, windowbottom, windowtop, -1, 1);
+    }
+    glGetDoublev(GL_PROJECTION_MATRIX, &projectionmatrix[0]);
+    glMatrixMode(GL_MODELVIEW);
 }
 
-void QGLViewerWidget::update_projection_matrix_one_viewer()
+void QGLViewerWidget::SetScenePosition(const OpenMesh::Vec3d& _center, const double & _radius)
 {
-	makeCurrent();
-	glMatrixMode(GL_PROJECTION);
-	glLoadIdentity();
-	gluPerspective(45.0, (GLfloat) width() / (GLfloat) height(), 0.01*Radius, 100.0*Radius);
-	glGetDoublev(GL_PROJECTION_MATRIX, &ProjectionMatrix[0]);
-	glMatrixMode(GL_MODELVIEW);
+    center = _center;
+    radius = _radius;
+
+    UpdateProjectionMatrix();
+    ViewAll();
 }
 
-void QGLViewerWidget::view_all()
+void QGLViewerWidget::ViewAll(void)
 {
-	OpenMesh::Vec3d _trans = OpenMesh::Vec3d( -(ModelViewMatrix[0]*Center[0] + 
-		ModelViewMatrix[4]*Center[1] +
-		ModelViewMatrix[8]*Center[2] + 
-		ModelViewMatrix[12]),
-		-(ModelViewMatrix[1]*Center[0] + 
-		ModelViewMatrix[5]*Center[1] +
-		ModelViewMatrix[9]*Center[2] + 
-		ModelViewMatrix[13]),
-		-(ModelViewMatrix[2]*Center[0] + 
-		ModelViewMatrix[6]*Center[1] +
-		ModelViewMatrix[10]*Center[2] + 
-		ModelViewMatrix[14] +
-		3.0*Radius) ) ;
+    OpenMesh::Vec3d _trans = OpenMesh::Vec3d(-(modelviewmatrix[0] * center[0] +
+        modelviewmatrix[4] * center[1] +
+        modelviewmatrix[8] * center[2] +
+        modelviewmatrix[12]),
+        -(modelviewmatrix[1] * center[0] +
+        modelviewmatrix[5] * center[1] +
+        modelviewmatrix[9] * center[2] +
+        modelviewmatrix[13]),
+        -(modelviewmatrix[2] * center[0] +
+        modelviewmatrix[6] * center[1] +
+        modelviewmatrix[10] * center[2] +
+        modelviewmatrix[14] +
+        2.0*radius));
 
-	makeCurrent();
-	glLoadIdentity();
-	glTranslated( _trans[0], _trans[1], _trans[2] );
-	glMultMatrixd(&ModelViewMatrix[0]);
-	glGetDoublev(GL_MODELVIEW_MATRIX, &ModelViewMatrix[0]);
-}
-
-void QGLViewerWidget::set_scene_pos(const OpenMesh::Vec3d& _center, float _radius)
-{
-	Center = _center;
-	Radius = _radius;
-	
-	update_projection_matrix();
-	view_all();
+    makeCurrent();
+    glLoadIdentity();
+    glTranslated(_trans[0], _trans[1], _trans[2]);
+    glMultMatrixd(&modelviewmatrix[0]);
+    glGetDoublev(GL_MODELVIEW_MATRIX, &modelviewmatrix[0]);
 }

@@ -1,19 +1,15 @@
-#include "surfacemeshprocessing.h"
-#include <QtWidgets/QApplication>
+#include <iostream>
+
+#include <surfacemeshprocessing.h>
 
 int main(int argc, char *argv[])
 {
-	QApplication app(argc, argv);
-
-	SurfaceMeshProcessing mainWin;
-	/*mainWin.setGeometry(100,100,mainWin.sizeHint().width(),mainWin.sizeHint().height());
-	mainWin.resize( mainWin.sizeHint() );*/
-	mainWin.showMaximized();
-
-	if( argc > 1 )
-	{
-		mainWin.open_mesh_from_main(argv[1]);
-	}
-
-	return app.exec();
+    QApplication app(argc, argv);
+    QSurfaceFormat format;
+    format.setSamples(16);
+    QSurfaceFormat::setDefaultFormat(format);
+    SurfaceMeshProcessing mainWin;
+    mainWin.move(100, 100);
+    mainWin.show();
+    return app.exec();
 }

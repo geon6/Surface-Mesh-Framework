@@ -1,105 +1,205 @@
-#include "MainViewerWidget.h"
+#include <iostream>
+#include <thread>
+#include <filesystem>
+
+#include <QLayout>
+#include <QThread>
+#include <QMessageBox>
+#include <MeshViewer/MainViewerWidget.h>
+#include <MeshViewer/InteractiveViewerWidget.h>
+
+#include <MeshParamWidget.h>
+
+using namespace std::literals;
+namespace fs = std::filesystem;
+
+// 自定义功能都放这里
+void MainViewerWidget::Custom() {
+    
+}
 
 MainViewerWidget::MainViewerWidget(QWidget* _parent/* =0 */)
+    :loadmeshsuccess(false)
 {
-	initViewerWindow();
-	LoadMeshSuccess = false;
-}
-MainViewerWidget::~MainViewerWidget()
-{
-};
-
-void MainViewerWidget::initViewerWindow()
-{
-	createParamIDialog();
-	createViewerDialog();
-
-	//this->setOrientation( Qt::Horizontal );
-
-	//this->addWidget(debugDialog);
-	//OpenGL mesh viewer
-	/*this->addWidget(MeshParam);
-	this->addWidget(MeshViewer);
-
-	//set the splitter line color
-	this->setStyleSheet("QSplitter::handle { background-color: green }");
-	QSplitterHandle* splitterHandle = this->handle(1);
-	splitterHandle->setDisabled(true);*/
-
-	QHBoxLayout* main_layout = new QHBoxLayout();
-	main_layout->addWidget(MeshParam, 1);
-	main_layout->addWidget(MeshViewer, 5);
-	this->setLayout(main_layout);
-
-	connect(MeshViewer,SIGNAL(setMouseMode_signal(int)),SIGNAL(setMouseMode_signal_main(int)));
-	connect(MeshViewer,SIGNAL(setDrawMode_signal(int)),SIGNAL(setDrawMode_signal_main(int)));
-	connect(MeshViewer,SIGNAL(set_edit_undo_enable_viewer_signal(bool)),SIGNAL(set_edit_undo_enable_signal(bool)));
-	connect(MeshViewer,SIGNAL(set_edit_redo_enable_viewer_signal(bool)),SIGNAL(set_edit_redo_enable_signal(bool)));
-
-	connect(MeshParam, SIGNAL(print_info_signal()), SLOT(print_info()));
+    InitViewerWindow();
 }
 
-void MainViewerWidget::createParamIDialog()
+MainViewerWidget::~MainViewerWidget(void)
 {
-	MeshParam = new MeshParamDialog();
 }
 
-void MainViewerWidget::createViewerDialog()
+void MainViewerWidget::InitViewerWindow(void)
 {
-	QGLFormat glFormat;
-	glFormat.setSampleBuffers(true);
-	glFormat.setSamples(16);
+    CreateViewerDialog();
+    CreateParamWidget();
 
-	MeshViewer = new InteractiveViewerWidget(glFormat, NULL);
-	MeshViewer->setAcceptDrops(true);
-	connect(MeshViewer,SIGNAL(loadMeshOK(bool,QString)), this, SLOT(LoadMeshFromInner(bool,QString)) );
+    QHBoxLayout* main_layout = new QHBoxLayout();
+    main_layout->addWidget(meshparamwidget);
+    main_layout->addWidget(meshviewerwidget, 1);
+    this->setLayout(main_layout);
 }
 
-void MainViewerWidget::open_mesh_gui(QString fname)
-{
-	if (fname.isEmpty() || !MeshViewer->openMesh(fname.toLocal8Bit())) 
-	{
-		QString msg = "Cannot read mesh from file:\n '";
-		msg += fname;
-		msg += "'";
-		QMessageBox::critical(NULL, windowTitle(), msg);
-	}
-	else
-	{
-		LoadMeshSuccess = true;
-		MeshViewer->setDrawMode(InteractiveViewerWidget::FLAT_POINTS);
-		MeshViewer->setMouseMode(InteractiveViewerWidget::TRANS);
-		if(LoadMeshSuccess)
-		{
-			SetMeshForALL();
-		}
-		emit(haveLoadMesh(fname));
-	}
+Mesh& MainViewerWidget::mesh() {
+    return meshviewerwidget->get_mesh();
 }
 
-void MainViewerWidget::save_mesh_gui(QString fname)
+void MainViewerWidget::CreateParamWidget(void)
 {
-	if (fname.isEmpty() || !MeshViewer->saveMesh(fname.toLocal8Bit()))
-	{
-		QString msg = "Cannot read mesh from file:\n '";
-		msg += fname;
-		msg += "'";
-		QMessageBox::critical(NULL, windowTitle(), msg);
-	}
+    meshparamwidget = new MeshParamWidget();
+    connect(meshparamwidget, SIGNAL(PrintInfoSignal()), meshviewerwidget, SLOT(PrintMeshInfo()));
+    Custom();
 }
 
-void MainViewerWidget::save_screen_gui(QString fname)
+void MainViewerWidget::CreateViewerDialog(void)
 {
-	if (fname.isEmpty() || !MeshViewer->saveScreen(fname.toLocal8Bit()))
-	{
-		QString msg = "Cannot save image to file:\n '";
-		msg += fname;
-		msg += "'";
-		QMessageBox::critical(NULL, windowTitle(), msg);
-	}
+    meshviewerwidget = new InteractiveViewerWidget(NULL);
+    meshviewerwidget->setAcceptDrops(true);
+    connect(meshviewerwidget, SIGNAL(LoadMeshOKSignal(bool, QString)), SLOT(LoadMeshFromInner(bool, QString)));
 }
 
-void MainViewerWidget::print_info()
+void MainViewerWidget::OpenMeshGUI(const QString & fname)
 {
-	MeshViewer->printBasicMeshInfo();
+    if (fname.isEmpty() || !meshviewerwidget->LoadMesh(fname.toStdString()))
+    {
+        QString msg = "Cannot read mesh from file:\n '" + fname + "'";
+        QMessageBox::critical(NULL, windowTitle(), msg);
+    }
+    else
+    {
+        loadmeshsuccess = true;
+        // emit(haveLoadMesh(fname));
+    }
+}
+
+void MainViewerWidget::SaveMeshGUI(const QString & fname)
+{
+    if (fname.isEmpty() || !meshviewerwidget->SaveMesh(fname.toStdString()))
+    {
+        QString msg = "Cannot read mesh from file:\n '" + fname + "'";
+        QMessageBox::critical(NULL, windowTitle(), msg);
+    }
+}
+
+void MainViewerWidget::LoadMeshFromInner(bool OK, QString fname)
+{
+    loadmeshsuccess = OK;
+    // emit(haveLoadMesh(fname));
+    // TODO 这个函数似乎没什么用
+}
+
+void MainViewerWidget::Open(void)
+{
+    QString fileName = QFileDialog::getOpenFileName(this,
+        tr("Open mesh file"),
+        tr("./model"),
+        tr("Mesh Files (*.obj *.off *.ply *.stl);;"
+        "OFF Files (*.off);;"
+        "OBJ Files (*.obj);;"
+        "PLY Files (*.ply);;"
+        "STL Files (*.stl);;"
+        "All Files (*)"));
+    if (!fileName.isEmpty())
+    {
+        OpenMeshGUI(fileName);
+    }
+}
+
+void MainViewerWidget::Save(void)
+{
+    QString fileName = QFileDialog::getSaveFileName(this,
+        tr("Save mesh file"),
+        tr("untitled.obj"),
+        tr("OBJ Files (*.obj);;"
+        "OFF Files (*.off);;"
+        "PLY Files (*.ply);;"
+        "STL Files (*.stl);;"
+        "All Files (*)"));
+    if (!fileName.isEmpty())
+    {
+        SaveMeshGUI(fileName);
+    }
+}
+
+void MainViewerWidget::ClearMesh(void)
+{
+    if (loadmeshsuccess)
+    {
+        loadmeshsuccess = false;
+        meshviewerwidget->Clear();
+    }
+}
+
+void MainViewerWidget::Screenshot(void)
+{
+    meshviewerwidget->ScreenShot();
+}
+
+void MainViewerWidget::ShowPoints(void)
+{
+    meshviewerwidget->SetDrawMode(InteractiveViewerWidget::POINTS);
+}
+
+void MainViewerWidget::ShowWireframe(void)
+{
+    meshviewerwidget->SetDrawMode(InteractiveViewerWidget::WIREFRAME);
+}
+
+void MainViewerWidget::ShowHiddenLines(void)
+{
+    meshviewerwidget->SetDrawMode(InteractiveViewerWidget::HIDDENLINES);
+}
+
+void MainViewerWidget::ShowFlatLines(void)
+{
+    meshviewerwidget->SetDrawMode(InteractiveViewerWidget::FLATLINES);
+}
+
+void MainViewerWidget::ShowFlat(void)
+{
+    meshviewerwidget->SetDrawMode(InteractiveViewerWidget::FLAT);
+}
+
+void MainViewerWidget::ShowSmooth(void)
+{
+    meshviewerwidget->SetDrawMode(InteractiveViewerWidget::SMOOTH);
+}
+
+void MainViewerWidget::Lighting(bool b)
+{
+    meshviewerwidget->EnableLighting(b);
+}
+
+void MainViewerWidget::DoubleSideLighting(bool b)
+{
+    meshviewerwidget->EnableDoubleSide(b);
+}
+
+void MainViewerWidget::ShowBoundingBox(bool b)
+{
+    meshviewerwidget->SetDrawBoundingBox(b);
+}
+
+void MainViewerWidget::ShowBoundary(bool b)
+{
+    meshviewerwidget->SetDrawBoundary(b);
+}
+
+void MainViewerWidget::ResetView(void)
+{
+    meshviewerwidget->ResetView();
+}
+
+void MainViewerWidget::ViewCenter(void)
+{
+    meshviewerwidget->ViewCenter();
+}
+
+void MainViewerWidget::CopyRotation(void)
+{
+    meshviewerwidget->CopyRotation();
+}
+
+void MainViewerWidget::LoadRotation(void)
+{
+    meshviewerwidget->LoadRotation();
 }
